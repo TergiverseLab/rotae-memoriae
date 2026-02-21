@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rotæ Memoriæ — Generador Combinatorio</title>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{margin:0;background:#fff;font-family:'EB Garamond',Georgia,serif;color:#000}
+::selection{background:#000;color:#fff}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-thumb{background:#ccc}
+::-webkit-scrollbar-track{background:#fafafa}
+
+.rb{background:#fff;border:1.5px solid #000;width:30px;height:30px;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:'EB Garamond',serif;transition:all .15s}
+.rb:hover{background:#000;color:#fff}
+.rb:active{transform:scale(.9)}
+.gb{background:#000;color:#fff;border:2px solid #000;padding:10px 20px;font-family:'EB Garamond',serif;font-size:13px;letter-spacing:2.5px;cursor:pointer;text-transform:uppercase;transition:all .2s;width:100%}
+.gb:hover{background:#fff;color:#000}
+.gb:disabled{opacity:.35;cursor:default}
+.hb{background:#fff;border:1.5px solid #000;padding:5px 12px;font-family:'EB Garamond',serif;font-size:12px;letter-spacing:1px;cursor:pointer;transition:all .15s;text-transform:uppercase}
+.hb:hover{background:#000;color:#fff}
+.cc{border:1px solid #ddd;padding:14px 18px;margin-bottom:6px;cursor:pointer;transition:all .15s;background:#fff;position:relative}
+.cc:hover{border-color:#000}
+.cc.active{border-color:#000;border-width:2px;padding:13px 17px}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.sp{width:16px;height:16px;border:2px solid #aaa;border-top-color:#000;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+.overlay{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center}
+.overlay-bg{position:absolute;inset:0;background:rgba(0,0,0,0.4)}
+.modal{position:relative;background:#fff;border:2px solid #000;max-height:85vh;overflow:auto;padding:32px 36px;margin:16px;font-family:'EB Garamond',Georgia,serif}
+.modal-close{position:absolute;top:12px;right:16px;background:none;border:none;font-size:22px;cursor:pointer}
+.preset-row{padding:8px 12px;border:1px solid #ddd;margin-bottom:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:border-color .15s}
+.preset-row:hover{border-color:#000}
+
+@media(max-width:920px){
+  .ml{flex-direction:column!important}
+  .sp-panel{width:100%!important;border-left:none!important;border-top:2px solid #000!important;max-height:50vh!important}
+  .bau-footer{position:relative!important;bottom:auto!important;left:auto!important;justify-content:center!important;padding:8px 0!important}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useMemo } = React;
+
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const N = 26;
+const DEG_STEP = 360 / N;
+const ANGLE_STEP = (2 * Math.PI) / N;
+const HALF_STEP = ANGLE_STEP / 2;
+
+const PROL = [
+  { id: 0, label: "Personaje", offset: 0 },
+  { id: 1, label: "Relación", offset: 0 },
+  { id: 2, label: "Objetivo", offset: 0 },
+  { id: 3, label: "Lugar", offset: 0 },
+];
+const PRESET_TEMPLATES = [
+  { name: "PROL (estándar)", rings: ["Personaje", "Relación", "Objetivo", "Lugar"] },
+  { name: "Mundo ficcional", rings: ["Sociedad", "Tecnología", "Conflicto", "Territorio"] },
+  { name: "Drama psicológico", rings: ["Carácter", "Emoción", "Secreto", "Detonante"] },
+  { name: "Cuento clásico", rings: ["Héroe", "Prueba", "Recompensa", "Moraleja"] },
+];
+const RING_RADII = [
+  { inner: 240, outer: 310 },
+  { inner: 170, outer: 237 },
+  { inner: 105, outer: 167 },
+  { inner: 55, outer: 102 },
+];
+const GENRES = [
+  { value: "", label: "Sin especificar" },
+  { value: "realista", label: "Realista" },
+  { value: "fantasía", label: "Fantasía" },
+  { value: "scifi", label: "Sci-Fi" },
+];
+
+/* ── Storage ── */
+function load(key, fb) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fb; } catch { return fb; } }
+function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
+
+/* ── AI Providers ── */
+const AI_PROVIDERS = {
+  gemini: {
+    name: "Gemini", hint: "Gratis — ai.google.dev", model: "gemini-2.5-flash", keyUrl: "https://aistudio.google.com/apikey",
+    call: async (prompt, key) => {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+        { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.9}}) });
+      const d = await r.json(); return d.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    },
+  },
+  groq: {
+    name: "Groq", hint: "Gratis — console.groq.com", model: "llama-3.3-70b-versatile", keyUrl: "https://console.groq.com/keys",
+    call: async (prompt, key) => {
+      const r = await fetch("https://api.groq.com/openai/v1/chat/completions",
+        { method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${key}`},
+          body: JSON.stringify({model:"llama-3.3-70b-versatile",messages:[{role:"user",content:prompt}],temperature:0.9,max_tokens:1000}) });
+      const d = await r.json(); return d.choices?.[0]?.message?.content || "";
+    },
+  },
+  mistral: {
+    name: "Mistral", hint: "Gratis (Experiment) — console.mistral.ai", model: "mistral-small-latest", keyUrl: "https://console.mistral.ai/api-keys",
+    call: async (prompt, key) => {
+      const r = await fetch("https://api.mistral.ai/v1/chat/completions",
+        { method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${key}`},
+          body: JSON.stringify({model:"mistral-small-latest",messages:[{role:"user",content:prompt}],temperature:0.9,max_tokens:1000}) });
+      const d = await r.json(); return d.choices?.[0]?.message?.content || "";
+    },
+  },
+  claude: {
+    name: "Claude", hint: "De pago — console.anthropic.com", model: "claude-sonnet-4-20250514", keyUrl: "https://console.anthropic.com/settings/keys",
+    call: async (prompt, key) => {
+      const r = await fetch("https://api.anthropic.com/v1/messages",
+        { method:"POST", headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+          body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]}) });
+      const d = await r.json(); return (d.content||[]).map(b=>b.text||"").join("");
+    },
+  },
+  openrouter: {
+    name: "OpenRouter", hint: "Multi-modelo — openrouter.ai", model: "mistralai/mistral-small-3.1-24b-instruct:free", keyUrl: "https://openrouter.ai/keys",
+    call: async (prompt, key) => {
+      const r = await fetch("https://openrouter.ai/api/v1/chat/completions",
+        { method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${key}`},
+          body: JSON.stringify({model:"mistralai/mistral-small-3.1-24b-instruct:free",messages:[{role:"user",content:prompt}],temperature:0.9,max_tokens:1000}) });
+      const d = await r.json(); return d.choices?.[0]?.message?.content || "";
+    },
+  },
+};
+
+/* ── Prompt ── */
+function buildPrompt(rings, settings) {
+  const parts = rings.map(r => ({ label: r.label, letter: ALPHABET[((r.offset % N) + N) % N] }));
+  const gl = settings.genre ? `Género/ambientación: ${settings.genre}.` : "";
+  const sd = ["muy genérico (palabras comunes)","genérico (ideas habituales)","intermedio","específico (nombres concretos, vocabulario técnico)","ultra-específico (nombres propios raros, datos muy concretos)"][settings.specificity-1];
+  return `Eres un generador de combinaciones narrativas al estilo del Ars Combinatoria de Giordano Bruno.
+Genera exactamente 6 combinaciones distintas. Cada combinación contiene:
+${parts.map(p=>`- "${p.label}": frase corta en castellano (1-4 palabras) que EMPIEZA por "${p.letter}"`).join("\n")}
+${gl}
+Nivel de especificidad: ${settings.specificity}/5 — ${sd}.
+Reglas: 1) Cada elemento EMPIEZA por su letra. 2) Máx 4 palabras. 3) Castellano. 4) Sin puntuación final ni emojis. 5) Sé variado y evocador.
+Responde SOLO con un array JSON, sin markdown, sin backticks:
+[{ ${parts.map(p=>`"${p.label}":"..."`).join(",")} }, ...]`;
+}
+function parseAI(text) {
+  const m = text.replace(/```json|```/g,"").trim().match(/\[[\s\S]*?\]/);
+  if (!m) throw new Error("JSON no encontrado"); return JSON.parse(m[0]);
+}
+
+/* ── SVG Ring ── */
+function Ring({ innerR, outerR, offset }) {
+  const midR=(innerR+outerR)/2, cellH=outerR-innerR, rot=-offset*DEG_STEP;
+  return (
+    <g style={{transform:`rotate(${rot}deg)`,transformOrigin:"0 0",transition:"transform 0.55s cubic-bezier(0.22,0.68,0.35,1)"}}>
+      <circle cx={0} cy={0} r={outerR} fill="none" stroke="#000" strokeWidth={1.8}/>
+      <circle cx={0} cy={0} r={innerR} fill="none" stroke="#000" strokeWidth={1.2}/>
+      {ALPHABET.map((letter,i)=>{
+        const la=-Math.PI/2+i*ANGLE_STEP, da=la-HALF_STEP;
+        const dx1=innerR*Math.cos(da),dy1=innerR*Math.sin(da),dx2=outerR*Math.cos(da),dy2=outerR*Math.sin(da);
+        const tx=midR*Math.cos(la),ty=midR*Math.sin(la),tr=(la*180)/Math.PI+90;
+        return (<g key={i}>
+          <line x1={dx1} y1={dy1} x2={dx2} y2={dy2} stroke="#000" strokeWidth={0.7}/>
+          <text x={tx} y={ty} textAnchor="middle" dominantBaseline="central" fontSize={cellH*0.46}
+            fontFamily="'EB Garamond',Georgia,serif" fontWeight={500} fill="#000"
+            style={{transform:`rotate(${tr}deg)`,transformOrigin:`${tx}px ${ty}px`}}>{letter}</text>
+        </g>);
+      })}
+    </g>
+  );
+}
+
+function WheelSVG({ rings }) {
+  const s=700,h=s/2,oR=RING_RADII[0].outer,ptY=-(oR+8),pbY=-(oR+22);
+  return (
+    <svg viewBox={`-${h} -${h} ${s} ${s}`} style={{width:"100%",maxWidth:560,height:"auto",aspectRatio:"1"}}>
+      <defs>
+        <pattern id="hA" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="#000" strokeWidth="0.35"/></pattern>
+        <pattern id="hB" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><line x1="0" y1="0" x2="0" y2="4" stroke="#000" strokeWidth="0.35"/></pattern>
+      </defs>
+      <circle cx={0} cy={0} r={320} fill="none" stroke="#000" strokeWidth={3}/>
+      <circle cx={0} cy={0} r={316} fill="none" stroke="#000" strokeWidth={0.5}/>
+      <circle cx={0} cy={0} r={310} fill="#fff"/>
+      <circle cx={0} cy={0} r={237} fill="#f9f9f9"/><circle cx={0} cy={0} r={237} fill="#fff" opacity={0.5}/>
+      <circle cx={0} cy={0} r={167} fill="#f6f6f6"/><circle cx={0} cy={0} r={167} fill="#fff" opacity={0.55}/>
+      <circle cx={0} cy={0} r={52} fill="url(#hA)"/><circle cx={0} cy={0} r={52} fill="url(#hB)" opacity={0.6}/>
+      <circle cx={0} cy={0} r={52} fill="none" stroke="#000" strokeWidth={1.8}/>
+      <circle cx={0} cy={0} r={18} fill="#fff" stroke="#000" strokeWidth={1.5}/><circle cx={0} cy={0} r={2} fill="#000"/>
+      {[...rings].reverse().map(ring=>{const rd=RING_RADII[ring.id];if(!rd)return null;return <Ring key={ring.id} innerR={rd.inner} outerR={rd.outer} offset={ring.offset}/>;})}
+      <polygon points={`-9,${pbY} 9,${pbY} 0,${ptY}`} fill="#000"/>
+    </svg>
+  );
+}
+
+/* ── Modals ── */
+function InfoModal({onClose}) {
+  return (<div className="overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}><div className="overlay-bg"/>
+    <div className="modal" style={{maxWidth:600}}>
+      <button className="modal-close" onClick={onClose}>×</button>
+      <h2 style={{fontSize:20,fontWeight:800,letterSpacing:3,textTransform:"uppercase",marginBottom:6}}>Rotæ Memoriæ</h2>
+      <p style={{fontSize:10,letterSpacing:3,color:"#999",textTransform:"uppercase",marginBottom:20}}>Ars Combinatoria</p>
+      <div style={{fontSize:14.5,lineHeight:1.75,color:"#222"}}>
+        <p style={{marginBottom:16,textAlign:"justify"}}><em>Rotae Memoriae</em> se inspira en las artes combinatorias de Ramon Llull (s.&nbsp;XIII) y Giordano Bruno (s.&nbsp;XVI), quienes concibieron ruedas y discos móviles para explorar sistemáticamente combinaciones de conceptos. En Llull, las letras representaban principios que, al permutarse, generaban proposiciones y preguntas; en Bruno, la tradición mnemotécnica se fusionó con la combinatoria para producir vastos sistemas de imágenes y relaciones.</p>
+        <p style={{marginBottom:16,textAlign:"justify"}}>Ambos buscaban externalizar el pensamiento: construir un dispositivo que enumerara posibilidades a partir de un vocabulario finito y reglas de combinación. Esta lógica —elementos discretos, permutación controlada, lectura interpretativa— anticipa la base operativa de los sistemas generativos actuales, donde un mecanismo recorre espacios combinatorios y un agente (humano o algorítmico) evalúa y selecciona.</p>
+        <p style={{marginBottom:24,textAlign:"justify"}}>Esta app traslada ese principio a la invención narrativa. Cada anillo define un tipo de elemento (p.&nbsp;ej., Personaje, Relación, Objetivo, Lugar) y su alineación produce combinaciones sugerentes que el usuario desarrolla creativamente. Así, <em>Rotae Memoriae</em> no "escribe" historias: funciona como instrumento de descubrimiento que provoca conexiones inesperadas y ayuda a encontrar configuraciones dramáticas fértiles dentro de un espacio combinatorio navegable.</p>
+        <h3 style={{fontSize:14,fontWeight:700,letterSpacing:2,textTransform:"uppercase",borderTop:"1px solid #ddd",paddingTop:16,marginBottom:10}}>Instrucciones</h3>
+        <p style={{marginBottom:14,textAlign:"justify"}}>Para construir una combinación, utiliza los controles de letras que aparecen bajo cada categoría. Cada bloque (Personaje, Relación, Objetivo, Lugar…) corresponde a un disco concéntrico de la rueda. Al pulsar las flechas izquierda o derecha de un bloque, cambias la letra seleccionada para ese anillo y la posición del disco en la rueda. La letra elegida indica con qué inicial empezará el elemento que se generará en esa categoría. Por ejemplo, si en Personaje seleccionas la letra A, las propuestas serán tipos de personaje que empiezan por A.</p>
+        <p style={{textAlign:"justify"}}>Además, puedes modificar libremente las categorías de cada bloque (por ejemplo: Personaje, Virtud, Profesión, Criatura, Lugar…). Así decides qué tipo de elemento corresponde a cada disco. Cuando hayas fijado las letras y categorías que te interesan, pulsa <em>Generar combinaciones</em> (requiere una API de IA compatible). La aplicación producirá resultados que respetan esas iniciales y tipos de elemento y los mostrará en el panel lateral. Si una configuración de categorías te resulta especialmente fértil, puedes guardarla en <em>Presets</em> para recuperarla y seguir explorando variaciones más adelante.</p>
+      </div>
+    </div>
+  </div>);
+}
+
+function APIModal({provider,apiKeys,onChangeProvider,onChangeKey,onClose}) {
+  return (<div className="overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}><div className="overlay-bg"/>
+    <div className="modal" style={{width:440}}>
+      <button className="modal-close" onClick={onClose}>×</button>
+      <h3 style={{fontSize:16,fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:16}}>Configuración IA</h3>
+      <div style={{marginBottom:16}}>
+        <div style={{fontSize:11,letterSpacing:1.5,color:"#999",textTransform:"uppercase",marginBottom:6}}>Proveedor activo</div>
+        {Object.entries(AI_PROVIDERS).map(([k,p])=>(
+          <label key={k} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",marginBottom:4,border:provider===k?"2px solid #000":"1px solid #ddd",cursor:"pointer",background:provider===k?"#f8f8f8":"#fff"}}>
+            <input type="radio" name="prov" checked={provider===k} onChange={()=>onChangeProvider(k)} style={{accentColor:"#000"}}/>
+            <div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{p.name}</div><div style={{fontSize:11,color:"#999"}}>{p.hint}</div></div>
+            <a href={p.keyUrl} target="_blank" rel="noopener noreferrer" title={`Obtener API Key de ${p.name}`}
+              onClick={e=>e.stopPropagation()}
+              style={{display:"flex",alignItems:"center",justifyContent:"center",width:30,height:30,border:"1px solid #ccc",borderRadius:4,textDecoration:"none",fontSize:15,color:"#000",transition:"all .15s",flexShrink:0}}
+              onMouseEnter={e=>{e.currentTarget.style.background="#000";e.currentTarget.style.color="#fff";e.currentTarget.style.borderColor="#000"}}
+              onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.color="#000";e.currentTarget.style.borderColor="#ccc"}}>🔑</a>
+          </label>
+        ))}
+      </div>
+      <div style={{borderTop:"1px solid #eee",paddingTop:14}}>
+        <div style={{fontSize:11,letterSpacing:1.5,color:"#999",textTransform:"uppercase",marginBottom:8}}>API Keys</div>
+        {Object.entries(AI_PROVIDERS).map(([k,p])=>(
+          <div key={k} style={{marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+              <label style={{fontSize:12,fontWeight:600}}>{p.name}</label>
+              <a href={p.keyUrl} target="_blank" rel="noopener noreferrer" style={{fontSize:10,color:"#999",textDecoration:"none",borderBottom:"1px dashed #ccc"}}
+                onMouseEnter={e=>e.currentTarget.style.color="#000"} onMouseLeave={e=>e.currentTarget.style.color="#999"}>obtener key →</a>
+            </div>
+            <input type="password" placeholder={`API Key ${p.name}`} value={apiKeys[k]||""} onChange={e=>onChangeKey(k,e.target.value)}
+              style={{width:"100%",padding:"6px 10px",border:"1px solid #ccc",fontFamily:"monospace",fontSize:12,outline:"none",boxSizing:"border-box"}}/>
+          </div>
+        ))}
+        <p style={{fontSize:11,color:"#aaa",marginTop:10,lineHeight:1.4}}>Las keys se guardan en tu navegador. No se envían a ningún servidor salvo la API que elijas.</p>
+      </div>
+    </div>
+  </div>);
+}
+
+function PresetsModal({customPresets,onApplyPreset,onSaveCurrent,onDeletePreset,onClose,currentLabels}) {
+  const [nn,setNn]=useState("");
+  return (<div className="overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}><div className="overlay-bg"/>
+    <div className="modal" style={{width:420}}>
+      <button className="modal-close" onClick={onClose}>×</button>
+      <h3 style={{fontSize:16,fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>Presets de categorías</h3>
+      <p style={{fontSize:11,color:"#999",marginBottom:14}}>Actual: {currentLabels.join(" · ")}</p>
+      <div style={{fontSize:11,letterSpacing:1.5,color:"#999",textTransform:"uppercase",marginBottom:6}}>Plantillas</div>
+      {PRESET_TEMPLATES.map((p,i)=>(<div key={i} className="preset-row" onClick={()=>onApplyPreset(p.rings)}>
+        <div><div style={{fontWeight:700,fontSize:13}}>{p.name}</div><div style={{fontSize:11,color:"#aaa"}}>{p.rings.join(" · ")}</div></div>
+        <span style={{fontSize:11,color:"#ccc"}}>→</span>
+      </div>))}
+      {customPresets.length>0&&<>
+        <div style={{fontSize:11,letterSpacing:1.5,color:"#999",textTransform:"uppercase",marginTop:14,marginBottom:6}}>Tus presets guardados</div>
+        {customPresets.map((p,i)=>(<div key={i} style={{padding:"8px 12px",border:"1px solid #ddd",marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div onClick={()=>onApplyPreset(p.rings)} style={{cursor:"pointer",flex:1}}>
+            <div style={{fontWeight:700,fontSize:13}}>{p.name}</div><div style={{fontSize:11,color:"#aaa"}}>{p.rings.join(" · ")}</div>
+          </div>
+          <button onClick={()=>onDeletePreset(i)} style={{background:"none",border:"1px solid #ddd",padding:"2px 8px",fontSize:11,cursor:"pointer",color:"#999"}}>×</button>
+        </div>))}
+      </>}
+      <div style={{borderTop:"1px solid #eee",paddingTop:14,marginTop:14,display:"flex",gap:6}}>
+        <input value={nn} onChange={e=>setNn(e.target.value)} placeholder="Nombre del preset"
+          style={{flex:1,padding:"6px 10px",border:"1px solid #ccc",fontFamily:"'EB Garamond',serif",fontSize:13,outline:"none"}}/>
+        <button onClick={()=>{if(nn.trim()){onSaveCurrent(nn.trim());setNn("");}}}
+          style={{background:"#000",color:"#fff",border:"none",padding:"6px 14px",fontFamily:"'EB Garamond',serif",fontSize:12,cursor:"pointer",letterSpacing:1}}>Guardar</button>
+      </div>
+    </div>
+  </div>);
+}
+
+/* ── MAIN APP ── */
+function App() {
+  const [rings,setRings]=useState(PROL.map(r=>({...r})));
+  const [results,setResults]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState(null);
+  const [history,setHistory]=useState([]);
+  const [selCombo,setSelCombo]=useState(null);
+  const [settings,setSettings]=useState({genre:"",specificity:3});
+  const [editLbl,setEditLbl]=useState(null);
+  const [showInfo,setShowInfo]=useState(false);
+  const [showAPI,setShowAPI]=useState(false);
+  const [showPresets,setShowPresets]=useState(false);
+
+  const [provider,setProvider]=useState(()=>load("rw-provider","gemini"));
+  const [apiKeys,setApiKeys]=useState(()=>load("rw-apikeys",{}));
+  const [customPresets,setCustomPresets]=useState(()=>load("rw-presets",[]));
+
+  useEffect(()=>{save("rw-provider",provider)},[provider]);
+  useEffect(()=>{save("rw-apikeys",apiKeys)},[apiKeys]);
+  useEffect(()=>{save("rw-presets",customPresets)},[customPresets]);
+
+  const letters=useMemo(()=>rings.map(r=>ALPHABET[((r.offset%N)+N)%N]),[rings]);
+  const rotate=useCallback((id,dir)=>{setRings(p=>p.map(r=>r.id===id?{...r,offset:(r.offset+dir+N)%N}:r))},[]);
+
+  const generate=useCallback(async()=>{
+    const key=apiKeys[provider]; if(!key){setShowAPI(true);return;}
+    setLoading(true);setError(null);
+    try{
+      const raw=await AI_PROVIDERS[provider].call(buildPrompt(rings,settings),key);
+      const combos=parseAI(raw); setResults(combos); setSelCombo(0);
+      if(combos[0]) setHistory(h=>[{key:letters.join(""),labels:rings.map(r=>r.label),combo:combos[0],t:new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})},...h].slice(0,30));
+    }catch(e){setError(`Error con ${AI_PROVIDERS[provider].name}: ${e.message||"respuesta inválida"}`);}
+    setLoading(false);
+  },[rings,settings,provider,apiKeys,letters]);
+
+  const randomize=()=>setRings(p=>p.map(r=>({...r,offset:Math.floor(Math.random()*N)})));
+  const renameLabel=(id,v)=>{setRings(p=>p.map(r=>r.id===id?{...r,label:v||r.label}:r));setEditLbl(null);};
+  const applyPreset=l=>{setRings(p=>p.map((r,i)=>({...r,label:l[i]||r.label})));setShowPresets(false);};
+  const saveCurrent=n=>setCustomPresets(p=>[...p,{name:n,rings:rings.map(r=>r.label)}]);
+  const deletePreset=i=>setCustomPresets(p=>p.filter((_,j)=>j!==i));
+  const ROM=["I","II","III","IV"];
+
+  return (<div style={{minHeight:"100vh",background:"#fff",color:"#000",fontFamily:"'EB Garamond',Georgia,serif"}}>
+    {showInfo&&<InfoModal onClose={()=>setShowInfo(false)}/>}
+    {showAPI&&<APIModal provider={provider} apiKeys={apiKeys} onChangeProvider={setProvider} onChangeKey={(k,v)=>setApiKeys(p=>({...p,[k]:v}))} onClose={()=>setShowAPI(false)}/>}
+    {showPresets&&<PresetsModal customPresets={customPresets} onApplyPreset={applyPreset} onSaveCurrent={saveCurrent} onDeletePreset={deletePreset} onClose={()=>setShowPresets(false)} currentLabels={rings.map(r=>r.label)}/>}
+
+    {/* HEADER */}
+    <header style={{borderBottom:"2px solid #000",padding:"10px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+      <div>
+        <h1 style={{fontSize:20,fontWeight:800,letterSpacing:5,textTransform:"uppercase"}}>Rotæ Memoriæ</h1>
+        <p style={{fontSize:10,letterSpacing:4,color:"#999",textTransform:"uppercase"}}>Generador Combinatorio · Tergiverso Lab</p>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+        <select className="hb" style={{textTransform:"none",padding:"4px 8px"}} value={settings.genre} onChange={e=>setSettings(s=>({...s,genre:e.target.value}))}>
+          {GENRES.map(g=><option key={g.value} value={g.value}>{g.label}</option>)}
+        </select>
+        <div style={{display:"flex",alignItems:"center",gap:4,border:"1.5px solid #000",padding:"3px 10px"}}>
+          <span style={{fontSize:11,letterSpacing:1}}>Especificidad</span>
+          {[1,2,3,4,5].map(v=>(<button key={v} onClick={()=>setSettings(s=>({...s,specificity:v}))}
+            style={{width:22,height:22,border:"1px solid #000",background:v<=settings.specificity?"#000":"#fff",
+              color:v<=settings.specificity?"#fff":"#000",fontSize:11,fontWeight:700,cursor:"pointer",
+              fontFamily:"'EB Garamond',serif",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>{v}</button>))}
+        </div>
+        <button className="hb" onClick={()=>setShowPresets(true)}>Presets</button>
+        <button className="hb" onClick={()=>setShowAPI(true)}>⚙ {AI_PROVIDERS[provider].name}</button>
+        <button className="hb" onClick={()=>setShowInfo(true)}>Info</button>
+      </div>
+    </header>
+
+    {/* BODY */}
+    <div className="ml" style={{display:"flex",height:"calc(100vh - 52px)",overflow:"hidden"}}>
+      {/* LEFT */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"12px 16px",overflow:"auto",position:"relative"}}>
+        <WheelSVG rings={rings}/>
+        <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap",justifyContent:"center"}}>
+          {rings.map(ring=>{
+            const lt=ALPHABET[((ring.offset%N)+N)%N];
+            return (<div key={ring.id} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,padding:"8px 14px",border:"1px solid #ddd"}}>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{fontSize:10,letterSpacing:1,color:"#aaa"}}>{ROM[ring.id]}.</span>
+                {editLbl===ring.id?
+                  <input style={{background:"none",border:"none",borderBottom:"1.5px solid #000",fontFamily:"'EB Garamond',serif",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:1.5,width:100,outline:"none",padding:"2px 0"}}
+                    defaultValue={ring.label} autoFocus onBlur={e=>renameLabel(ring.id,e.target.value)} onKeyDown={e=>{if(e.key==="Enter")e.target.blur()}}/>
+                  :<span onClick={()=>setEditLbl(ring.id)} style={{fontSize:12,fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",cursor:"pointer",borderBottom:"1px dashed #ccc"}} title="Clic para editar">{ring.label}</span>}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <button className="rb" onClick={()=>rotate(ring.id,-1)}>◂</button>
+                <div style={{fontSize:30,fontWeight:800,width:42,height:42,border:"2px solid #000",display:"flex",alignItems:"center",justifyContent:"center"}}>{lt}</div>
+                <button className="rb" onClick={()=>rotate(ring.id,1)}>▸</button>
+              </div>
+            </div>);
+          })}
+        </div>
+        <button className="hb" onClick={randomize} style={{marginTop:10,padding:"7px 20px"}}>⟳ Aleatorio</button>
+        {/* BAU */}
+        <div className="bau-footer" style={{position:"absolute",bottom:12,left:16,display:"flex",alignItems:"center",gap:8,opacity:0.6}}>
+          <img src="LogoBAU.jpeg" alt="BAU" style={{height:28,width:"auto",filter:"grayscale(100%)"}} onError={e=>{e.target.style.display="none"}}/>
+          <span style={{fontSize:9,letterSpacing:1.5,color:"#888",textTransform:"uppercase",lineHeight:1.2}}>Taller<br/>audiovisual</span>
+        </div>
+      </div>
+
+      {/* RIGHT */}
+      <div className="sp-panel" style={{width:370,borderLeft:"2px solid #000",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <div style={{padding:"14px 18px",borderBottom:"1.5px solid #000"}}>
+          <div style={{fontSize:9,letterSpacing:4,textTransform:"uppercase",color:"#aaa",marginBottom:8}}>Alineación</div>
+          <div style={{display:"flex",gap:6,justifyContent:"center"}}>
+            {rings.map(ring=>(<div key={ring.id} style={{textAlign:"center"}}>
+              <div style={{width:50,height:50,border:"2px solid #000",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,fontWeight:800}}>{ALPHABET[((ring.offset%N)+N)%N]}</div>
+              <div style={{fontSize:8,letterSpacing:1,marginTop:3,textTransform:"uppercase",color:"#aaa"}}>{ring.label}</div>
+            </div>))}
+          </div>
+        </div>
+        <div style={{padding:"10px 18px",borderBottom:"1px solid #ddd"}}>
+          <button className="gb" onClick={generate} disabled={loading}>
+            {loading?<span style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><span className="sp" style={{borderColor:"#666",borderTopColor:"#fff"}}/> Generando…</span>:"Generar combinaciones"}
+          </button>
+        </div>
+        <div style={{flex:1,overflowY:"auto",padding:"0 18px 20px"}}>
+          {error&&<div style={{padding:12,margin:"12px 0",border:"1px solid #000",fontSize:13}}>{error}
+            <button onClick={()=>setShowAPI(true)} style={{display:"block",marginTop:6,background:"none",border:"1px solid #000",padding:"4px 10px",fontFamily:"'EB Garamond',serif",fontSize:12,cursor:"pointer"}}>Configurar API</button></div>}
+          {results.length>0&&<div style={{paddingTop:12}}>
+            <div style={{fontSize:9,letterSpacing:3,textTransform:"uppercase",color:"#aaa",marginBottom:8}}>Combinaciones · {letters.join("·")} · {AI_PROVIDERS[provider].name}</div>
+            {results.map((combo,idx)=>(<div key={idx} className={`cc${selCombo===idx?" active":""}`} onClick={()=>setSelCombo(idx)}>
+              <span style={{position:"absolute",top:6,right:10,fontSize:9,color:"#ccc"}}>{idx+1}</span>
+              {rings.map(ring=>{const val=combo[ring.label]||"—";return(
+                <div key={ring.id} style={{display:"flex",gap:10,alignItems:"baseline",marginBottom:2}}>
+                  <span style={{fontSize:9,color:"#bbb",textTransform:"uppercase",letterSpacing:1.5,minWidth:72,textAlign:"right"}}>{ring.label}</span>
+                  <span style={{fontWeight:600,fontSize:15}}><span style={{fontWeight:800}}>{val.charAt(0)}</span>{val.slice(1)}</span>
+                </div>);})}
+            </div>))}
+          </div>}
+          {results.length===0&&!loading&&!error&&<div style={{padding:"40px 20px",textAlign:"center",color:"#ddd"}}>
+            <svg width="48" height="48" viewBox="0 0 48 48" style={{marginBottom:12,opacity:0.3}}>
+              <circle cx="24" cy="24" r="22" fill="none" stroke="#000" strokeWidth="1.5"/><circle cx="24" cy="24" r="14" fill="none" stroke="#000" strokeWidth="1"/>
+              <circle cx="24" cy="24" r="6" fill="none" stroke="#000" strokeWidth="0.8"/><circle cx="24" cy="24" r="1.5" fill="#000"/></svg>
+            <div style={{fontSize:14,fontStyle:"italic",color:"#bbb"}}>Gira las ruedas y pulsa<br/><em>Generar</em></div>
+          </div>}
+          {selCombo!==null&&results[selCombo]&&<div style={{marginTop:14,padding:18,border:"2px solid #000"}}>
+            <div style={{fontSize:9,letterSpacing:3,textTransform:"uppercase",color:"#999",marginBottom:10}}>Seleccionada</div>
+            {rings.map(ring=>{const val=results[selCombo][ring.label]||"—";return(<div key={ring.id} style={{marginBottom:5}}>
+              <div style={{fontSize:9,textTransform:"uppercase",letterSpacing:2,color:"#aaa"}}>{ring.label}</div>
+              <div style={{fontSize:21,fontWeight:700,lineHeight:1.2}}>{val}</div></div>);})}
+          </div>}
+          {history.length>0&&<div style={{paddingTop:18}}>
+            <div style={{fontSize:9,letterSpacing:3,textTransform:"uppercase",color:"#aaa",marginBottom:6,borderTop:"1px solid #eee",paddingTop:12}}>Historial</div>
+            {history.map((h,i)=>(<div key={i} style={{padding:"4px 0",borderBottom:"1px solid #f0f0f0",fontSize:12,color:"#888"}}>
+              <span style={{color:"#ccc",fontSize:10,marginRight:6}}>{h.t}</span>
+              <span style={{fontWeight:700,color:"#000",letterSpacing:1}}>{h.key.split("").join("·")}</span>
+              <span style={{color:"#bbb"}}> → </span>
+              {h.labels.map((label,j)=>(<span key={j}><span style={{color:"#555"}}>{h.combo[label]}</span>{j<h.labels.length-1&&<span style={{color:"#ddd"}}> · </span>}</span>))}
+            </div>))}
+          </div>}
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
